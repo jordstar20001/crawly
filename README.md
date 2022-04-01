@@ -8,11 +8,20 @@ All it does at its core is:
 - Recursively span across all urls in the page, whilst:
     - Obtaining interesting metrics (IP location, frequency, filetype, server type, etc)
     - Attempting to be performant by using multiple threads
+    - **Support for multiple pages at once**
+    - Options include:
+        - Gaining stats over each site
 - Provide filtering options, such as:
     - Domain filtering (regex, previously seen)
     - Country filtering
     - Limits (cardinality)
-- Cater for visualisations
+- Cater for visualisations, such as:
+    - Geolocational visualisations
+    - Frequency visualisations
+    - Network visualisations
+    - More!
+- Caching
+    - Specific searching using precached sites
 
 ## Dependencies
 #### What do you need to run *CRAWLY* for yourself?
