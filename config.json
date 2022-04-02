@@ -1,4 +1,6 @@
 {
     "max_depth": 100,
-    "source_pages": ["https://wikipedia.com"]
+    "source_pages": ["https://wikipedia.com"],
+    "log_file": "crawly.log",
+    "log_console": true
 }

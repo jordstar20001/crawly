@@ -9,3 +9,6 @@ from crawly import CrawlyCrawler
 
 # Create instance
 cwlr = CrawlyCrawler(config = "config.json")
+
+# Start it!
+cwlr.start()
