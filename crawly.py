@@ -83,11 +83,7 @@ class CrawlyCrawler():
 
         self.setup()
 
-<<<<<<< HEAD
     def setup(self):
-=======
-    def setup():
->>>>>>> 823eb2ee34f23752161e836b994b53041a7e76dc
         """
             Perform operations to setup the crawling process
         """
