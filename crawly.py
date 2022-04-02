@@ -6,9 +6,14 @@
 
 # Import dependencies
 from collections import deque
+import threading
+from time import sleep
 import requests, json, pandas as pd, numpy as np
 from schema import Schema, And, Use, Optional, SchemaError
 from crawlog import Crawlogger
+import re
+
+URL_MATCH_REGEXP = "http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+"
 
 OPTIONS_SCHEMA = Schema({
     # All source pages must have http / https, and must be strings. Must be at least one src
@@ -25,8 +30,8 @@ OPTIONS_SCHEMA = Schema({
     # Max depth is default 0 (infinity), but must be 0 or positive
     Optional("max_depth", default=0): And(int, lambda x: x >= 0),
 
-    # Asynchronous crawling?
-    Optional("async", default=False): bool,
+    # Asynchronous crawling (workers)? Value of 0 means synchronous.
+    Optional("workers", default=1): And(int, lambda x: 0 < x <= 16),
 
     # Export data to csv?
     Optional("csv_export", default=None): str,
@@ -63,8 +68,59 @@ def get_default_crawly_options():
 
     return options
 
+class CrawlyWorker():
+    """
+        Performs crawling and reports back to the main crawler object.
+    """
+    def __init__(self, worker_id: int, host: 'CrawlyCrawler'):
+        self.id = worker_id
+        self.__active = True
+        self.working: bool = False
+        self.current_job: str = None
+        self.host: 'CrawlyCrawler' = host
+        self.logger = Crawlogger(
+            show_in_console = host.opt("log_console"),
+            fpath = host.opt("log_file"),
+            name = f"Worker #{worker_id}"
+        )
+        
+        self.log = self.logger.log
 
+    def run(self):
+        self.THREAD = threading.Thread(target = self.__T_exec)
+        self.THREAD.run()
+
+    def stop(self):
+        self.__active = False
+        
+    def __T_exec(self):
+        """
+            Continually pull jobs until there are none left
+        """
+        while self.__active:
+            self.current_job = self.host.get_next_job()
+            if self.current_job: self.__process()
+            else: sleep(1)
+
+    def __process(self):
+        # First, perform get request
+        data = requests.get(self.current_job)
+        self.log("Address crawled: " + self.current_job)
+        self.log(f"Status: {data.status_code}")
+
+        # Perform a regexp search for other urls within the data
+        url_matches = re.findall(URL_MATCH_REGEXP, data.text)
+
+        for match in url_matches:
+            self.log(f"URL found: '{match}'")
+
+
+    
 class CrawlyCrawler():
+    """
+        Main class for crawler.
+        Manages all things to do with crawling.
+    """
     def __init__(self, **kwa):
         """
             Crawly Crawler constructor.
@@ -103,11 +159,12 @@ class CrawlyCrawler():
 
         self.setup()
 
-    def __get_next_job(self):
+    def get_next_job(self):
         # Depending on options, treat as queue or stack
+        if not len(self.url_jobs): return None
         return self.url_jobs.popleft() if self.opt("depth_first") else self.url_jobs.pop()
 
-    def __store_next_job(self, url: str):
+    def store_next_job(self, url: str):
         # Depending on options
         if len(self.url_jobs) == self.opt("url_buffersize"):
             raise BufferError(f"URL job buffer overflow: couldn't add URL: '{url}'.")
@@ -140,11 +197,21 @@ class CrawlyCrawler():
 
         # Store each starting page into the URL jobs
         for page in self.opt("source_pages"):
-            self.__store_next_job(page)
+            self.store_next_job(page)
             
+        # Create the workers (but don't start them, yet)
+        self.workers = [CrawlyWorker(i + 1, self) for i in range(self.opt("workers"))]
 
     def start(self):
         """
             Begin the crawling process
         """
         self.log("Crawling started")
+
+        # Create workers
+        for worker in self.workers: worker.run()
+
+    def stop(self):
+        # Tell all workers to stop
+        for worker in self.workers:
+            worker.stop()

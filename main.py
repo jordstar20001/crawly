@@ -12,3 +12,7 @@ cwlr = CrawlyCrawler(config = "config.json")
 
 # Start it!
 cwlr.start()
+
+input()
+
+cwlr.stop()

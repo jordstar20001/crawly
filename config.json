@@ -2,5 +2,6 @@
     "max_depth": 100,
     "source_pages": ["https://wikipedia.com"],
     "log_file": "crawly.log",
-    "log_console": true
+    "log_console": true,
+    "workers": 10
 }
