@@ -6,12 +6,14 @@
 
 # Import dependencies
 from collections import deque
+from email.policy import default
 import threading
 from time import sleep
 import requests, json, pandas as pd, numpy as np
 from schema import Schema, And, Use, Optional, SchemaError
 from crawlog import Crawlogger
 import re
+import socket
 
 URL_MATCH_REGEXP = "http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+"
 
@@ -20,7 +22,10 @@ OPTIONS_SCHEMA = Schema({
     "source_pages": And([str], lambda lst: len(lst) > 0 and all([map(v.startswith, ["http", "https"]) for v in lst])),
 
     # === OPTIONAL ===
-    
+
+    # Only store if domain not seen
+    Optional("ignore_same_domain", default=False): bool,
+
     # Provide a logging file
     Optional("log_file", default=None): str,
 
@@ -88,7 +93,7 @@ class CrawlyWorker():
 
     def run(self):
         self.THREAD = threading.Thread(target = self.__T_exec)
-        self.THREAD.run()
+        self.THREAD.start()
 
     def stop(self):
         self.__active = False
@@ -109,11 +114,8 @@ class CrawlyWorker():
         self.log(f"Status: {data.status_code}")
 
         # Perform a regexp search for other urls within the data
-        url_matches = re.findall(URL_MATCH_REGEXP, data.text)
-
-        for match in url_matches:
-            self.log(f"URL found: '{match}'")
-
+        url_info = [self.host.get_url_info(url) for url in re.findall(URL_MATCH_REGEXP, data.text)]
+        self.log(f"Info: {url_info}")
 
     
 class CrawlyCrawler():
@@ -159,6 +161,58 @@ class CrawlyCrawler():
 
         self.setup()
 
+    def get_url_info(self, url: str):
+        """
+            Obtains info for a given URL, as determined in `options`.
+        """
+        # Get domain name
+        # TODO: find a more efficient way to do this
+        url = re.sub("\?.*", "", url)
+
+        domain = re.sub("/.*", "", re.sub(r"https?://", "", url))
+        
+        if url in self.sites_seen:
+            self.sites_seen[url] += 1
+            return None
+
+        if self.opt("ignore_same_domain") and domain in self.domains_seen:
+            self.domains_seen[url] += 1
+            return None
+
+        self.log(f"Domain determined: {domain}")
+
+        # Get url suffix
+        res = re.search("(net|com|co|gov|biz).*", domain)
+        if not res:
+            res = re.search("\.(?!.*\.).*$", domain)
+
+        suffix = res.group()
+
+        self.log(f"Suffix determined: {suffix}")
+
+        # Get IP address
+        try:
+            ip_addr = socket.gethostbyname(domain)
+
+        except:
+            ip_addr = None
+
+        self.log(f"IP address: {ip_addr}")
+
+        # Store them in seen
+        self.sites_seen[url] = 1
+        self.domains_seen[url] = 1
+        
+        # TODO: add more stats
+        return {
+            "url": url,
+            "domain": domain,
+            "suffix": suffix,
+            "ip": ip_addr
+        }
+
+
+
     def get_next_job(self):
         # Depending on options, treat as queue or stack
         if not len(self.url_jobs): return None
@@ -189,6 +243,11 @@ class CrawlyCrawler():
             insta_flush = True,
             name = "CRAWLY"
         )
+
+        self.domains_seen = {}
+        self.sites_seen = {}
+
+        self.domains = self.opt("")
 
         self.log = self.logger.log
 
