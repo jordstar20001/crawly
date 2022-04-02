@@ -14,6 +14,15 @@ OPTIONS_SCHEMA = Schema({
 
     # All source pages must have http / https, and must be strings. Must be at least one src
     "source_pages": And([str], lambda lst: len(lst) > 0 and all([map(v.startswith, ["http", "https"]) for v in lst])),
+
+    # Asynchronous crawling?
+    Optional("async", default=False): bool,
+
+    # Export data to csv?
+    Optional("csv_export", default=None): str,
+
+    # Get geolocation data?
+    Optional("geolocational", default=False): bool
 })
 
 # Default Crawly exception
@@ -71,6 +80,14 @@ class CrawlyCrawler():
 
         except SchemaError as e:
             raise CrawlyException(f"Options were not valid.\n{e}")
+
+        self.setup()
+
+    def setup(self):
+        """
+            Perform operations to setup the crawling process
+        """
+        pass
 
     def start(self):
         """
