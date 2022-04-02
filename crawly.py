@@ -5,15 +5,25 @@
 """
 
 # Import dependencies
+from collections import deque
 import requests, json, pandas as pd, numpy as np
 from schema import Schema, And, Use, Optional, SchemaError
+from crawlog import Crawlogger
 
 OPTIONS_SCHEMA = Schema({
-    # Max depth is default 0 (infinity), but must be 0 or positive
-    Optional("max_depth", default=0): And(int, lambda x: x >= 0),
-
     # All source pages must have http / https, and must be strings. Must be at least one src
     "source_pages": And([str], lambda lst: len(lst) > 0 and all([map(v.startswith, ["http", "https"]) for v in lst])),
+
+    # === OPTIONAL ===
+    
+    # Provide a logging file
+    Optional("log_file", default=None): str,
+
+    # Should logging show in the console?
+    Optional("log_console", default=False): bool,
+
+    # Max depth is default 0 (infinity), but must be 0 or positive
+    Optional("max_depth", default=0): And(int, lambda x: x >= 0),
 
     # Asynchronous crawling?
     Optional("async", default=False): bool,
@@ -22,7 +32,15 @@ OPTIONS_SCHEMA = Schema({
     Optional("csv_export", default=None): str,
 
     # Get geolocation data?
-    Optional("geolocational", default=False): bool
+    Optional("geolocational", default=False): bool,
+
+    # URL buffer size, determines how many URLs can be saved for later crawling.
+    # If it is left default, the buffersize will be permitted to grow.
+    Optional("url_buffersize", default=None): And(int, lambda x: x > 10),
+
+    # Option to determine if depth traversal (i.e., LIFO) will be used, or
+    # breadth traversal (i.e., FIFO).
+    Optional("depth_first", default=False): bool
 })
 
 # Default Crawly exception
@@ -33,7 +51,9 @@ def get_default_crawly_options():
         Returns the default options that must be provided to the CrawlyCrawler constructor.
     """
     options = {
-        "max_depth": 100
+        "max_depth": 100,
+        "source_pages": ["https://wikipedia.com"],
+        "log_file": "crawler.log"
     }
 
     if not OPTIONS_SCHEMA.is_valid(options):
@@ -83,14 +103,48 @@ class CrawlyCrawler():
 
         self.setup()
 
+    def __get_next_job(self):
+        # Depending on options, treat as queue or stack
+        return self.url_jobs.popleft() if self.opt("depth_first") else self.url_jobs.pop()
+
+    def __store_next_job(self, url: str):
+        # Depending on options
+        if len(self.url_jobs) == self.opt("url_buffersize"):
+            raise BufferError(f"URL job buffer overflow: couldn't add URL: '{url}'.")
+
+        self.url_jobs.append(url)
+
+    def opt(self, name: str):
+        """
+            Returns the option with specified name
+        """
+        if name in self.options: return self.options[name]
+        return None
+
     def setup(self):
         """
             Perform operations to setup the crawling process
         """
-        pass
+        # Setup logger
+        self.logger = Crawlogger(
+            show_in_console = self.opt("log_console"),
+            fpath = self.opt("log_file"),
+            insta_flush = True,
+            name = "CRAWLY"
+        )
+
+        self.log = self.logger.log
+
+        # Create a deque to store URLS to be processed
+        self.url_jobs = deque(maxlen = self.opt("url_buffersize"))
+
+        # Store each starting page into the URL jobs
+        for page in self.opt("source_pages"):
+            self.__store_next_job(page)
+            
 
     def start(self):
         """
             Begin the crawling process
         """
-        pass
+        self.log("Crawling started")
