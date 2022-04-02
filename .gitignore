@@ -1,2 +1,5 @@
 # No log files plz
 *.log
+
+# No __pycache__ either, thx
+__pycache__
