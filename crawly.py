@@ -9,6 +9,7 @@ from collections import deque
 from email.policy import default
 import threading
 from time import sleep
+from xmlrpc.client import FastMarshaller
 import requests, json, pandas as pd, numpy as np
 from schema import Schema, And, Use, Optional, SchemaError
 from crawlog import Crawlogger
@@ -16,7 +17,7 @@ import re
 import socket
 
 URL_MATCH_REGEXP = "http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+"
-
+#URL_MATCH_REGEXP = r"(?i)\b((?:https?://|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'\".,<>?«»“”‘’]))"
 OPTIONS_SCHEMA = Schema({
     # All source pages must have http / https, and must be strings. Must be at least one src
     "source_pages": And([str], lambda lst: len(lst) > 0 and all([map(v.startswith, ["http", "https"]) for v in lst])),
@@ -102,38 +103,57 @@ class CrawlyWorker():
         """
             Continually pull jobs until there are none left
         """
+        self.working = True
         while self.__active:
             self.current_job = self.host.get_next_job()
             if self.current_job: self.__process()
             else: sleep(1)
 
+        self.working = False
+
     def __process(self):
         # First, perform get request
-        data = requests.get(self.current_job)
-        self.log("Address crawled: " + self.current_job)
+        current_url, parent = self.current_job
+        try:
+            data = requests.get(current_url)
+        except: return
+        self.log("Address crawled: " + current_url)
         self.log(f"Status: {data.status_code}")
 
         # Perform a regexp search for other urls within the data
-        url_info = [self.host.get_url_info(url) for url in re.findall(URL_MATCH_REGEXP, data.text)]
+        # url_info = [self.host.get_url_info(url) for url in re.findall(URL_MATCH_REGEXP, data.text)]
         
+        url_info = self.host.get_url_info(current_url)
+        urls_found = self.host.filter_urls(re.findall(URL_MATCH_REGEXP, data.text))
+        
+        # Add to jobs collection
+        for url in urls_found:
+            self.host.store_next_job((url, current_url))
+
         # Get other info from the request
         request_info = {
-            "content_type": data.headers["Content-Type"],
-            "server_type": data.headers["Server"] if "Server" in data.headers else None,
-            "cardinality": len(url_info),
-            "urls": url_info
+            "status_code": data.status_code,
+            "content_type": data.headers["Content-Type"] if "Content-Type" in data.headers else "unknown",
+            "server_type": data.headers["Server"] if "Server" in data.headers else "unknown",
+            "cardinality": len(urls_found),
+            "parent": parent
         }
+
+        request_info.update(url_info)
 
         # Add info to host
         self.host.results.append(request_info)
 
-        # Add to jobs collection
-        for info in url_info:
-            if info:
-                self.host.store_next_job(info['url'])
-
-
+def get_domain(url):
+    """
+        Gets the domain from a given URL
+    """
+    return re.sub("/.*", "", re.sub(r"https?://", "", url))
     
+
+def url_clean(url):
+    return re.sub("\?.*", "", url)
+
 class CrawlyCrawler():
     """
         Main class for crawler.
@@ -183,17 +203,15 @@ class CrawlyCrawler():
         """
         # Get domain name
         # TODO: find a more efficient way to do this
-        url = re.sub("\?.*", "", url)
-
-        domain = re.sub("/.*", "", re.sub(r"https?://", "", url))
+        domain = get_domain(url)
         
         if url in self.sites_seen:
             self.sites_seen[url] += 1
-            return None
+        else: self.sites_seen[url] = 1
 
         if self.opt("ignore_same_domain") and domain in self.domains_seen:
-            self.domains_seen[url] += 1
-            return None
+            self.domains_seen[domain] += 1
+        else: self.domains_seen[domain] = 1
 
         self.log(f"Domain determined: {domain}")
 
@@ -212,12 +230,6 @@ class CrawlyCrawler():
 
         except:
             ip_addr = None
-
-        self.log(f"IP address: {ip_addr}")
-
-        # Store them in seen
-        self.sites_seen[url] = 1
-        self.domains_seen[url] = 1
         
         # TODO: add more stats
         return {
@@ -227,6 +239,18 @@ class CrawlyCrawler():
             "ip": ip_addr
         }
 
+    def filter_urls(self, urls):
+        """
+            Filters a list of URLs based on options.
+        """
+        res = []
+        for url in urls:
+            url = url_clean(url)
+            # Get domain
+            domain = get_domain(url)
+            if not(url in self.sites_seen or (self.opt("ignore_same_domain") and domain in self.domains_seen)):
+                res.append(url)
+        return res
 
 
     def get_next_job(self):
@@ -275,7 +299,7 @@ class CrawlyCrawler():
 
         # Store each starting page into the URL jobs
         for page in self.opt("source_pages"):
-            self.store_next_job(page)
+            self.store_next_job((page, None))
             
         # Create the workers (but don't start them, yet)
         self.workers = [CrawlyWorker(i + 1, self) for i in range(self.opt("workers"))]
@@ -289,10 +313,15 @@ class CrawlyCrawler():
         # Create workers
         for worker in self.workers: worker.run()
 
-    def stop(self):
+    def stop(self, wait = False):
         # Tell all workers to stop
         for worker in self.workers:
             worker.stop()
+
+        if wait:
+            while any(worker.working for worker in self.workers):
+                sleep(0.1)
+
 
     def obtain_results(self):
         return pd.DataFrame.from_records(self.results)

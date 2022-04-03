@@ -16,7 +16,7 @@ cwlr.start()
 
 input()
 
-cwlr.stop()
+cwlr.stop(wait = True)
 
 results: pandas.DataFrame = cwlr.obtain_results()
 
