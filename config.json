@@ -3,5 +3,6 @@
     "source_pages": ["https://wikipedia.com", "https://google.com.au"],
     "log_file": "crawly.log",
     "log_console": true,
-    "workers": 10
+    "workers": 10,
+    "ignore_same_domain": true
 }

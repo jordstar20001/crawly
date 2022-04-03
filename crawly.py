@@ -115,7 +115,23 @@ class CrawlyWorker():
 
         # Perform a regexp search for other urls within the data
         url_info = [self.host.get_url_info(url) for url in re.findall(URL_MATCH_REGEXP, data.text)]
-        self.log(f"Info: {url_info}")
+        
+        # Get other info from the request
+        request_info = {
+            "content_type": data.headers["Content-Type"],
+            "server_type": data.headers["Server"] if "Server" in data.headers else None,
+            "cardinality": len(url_info),
+            "urls": url_info
+        }
+
+        # Add info to host
+        self.host.results.append(request_info)
+
+        # Add to jobs collection
+        for info in url_info:
+            if info:
+                self.host.store_next_job(info['url'])
+
 
     
 class CrawlyCrawler():
@@ -244,6 +260,9 @@ class CrawlyCrawler():
             name = "CRAWLY"
         )
 
+        # Place to store 'resultant' data
+        self.results = []
+
         self.domains_seen = {}
         self.sites_seen = {}
 
@@ -274,3 +293,6 @@ class CrawlyCrawler():
         # Tell all workers to stop
         for worker in self.workers:
             worker.stop()
+
+    def obtain_results(self):
+        return pd.DataFrame.from_records(self.results)

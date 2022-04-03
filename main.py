@@ -5,6 +5,7 @@
 """
 
 # Import API
+import pandas
 from crawly import CrawlyCrawler
 
 # Create instance
@@ -16,3 +17,9 @@ cwlr.start()
 input()
 
 cwlr.stop()
+
+results: pandas.DataFrame = cwlr.obtain_results()
+
+csv_loc = input('Where would you like the CSV? : ')
+
+results.to_csv(csv_loc)
